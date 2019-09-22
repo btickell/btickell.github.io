@@ -1,0 +1,31 @@
+@import url(monokai.css);
+
+.highlight {
+  margin: 1em 0;
+  .border-radius: 25px;
+}
+
+pre.highlight {
+  padding: 1em;
+  .border-radius: 500px;
+}
+
+div {
+	.border-radius: 25px;
+}
+
+
+h1 {
+    font-size: 3em;
+    font-family:'Helvetica', 'Arial', 'Sans-Serif';
+}
+p {
+    font-size: 1.0em;
+    line-height: 1.4em;
+    color: #333;
+}
+footer {
+    border-top: 1px solid #d5d5d5;
+    font-size: .8em;
+}
+
