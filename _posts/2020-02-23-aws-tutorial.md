@@ -54,6 +54,8 @@ ssh -i /path/to/your/.pem ubuntu@yourpublicip
 
 Once connected you can install any software, packages, or docker images as well as store any files you would like present in all of your experiments. For persistent file storage, it is preferable to store files on a file server or on AWS s3 storage for ease of access.
 
+**If running doodad to launch experiments (details later), install docker and unzip prior to making your snapshot.**
+
 It is beneficial to do this now, as you will create a snapshot of this instance that you can boot from in the future.
 
 ## Make a snapshot. 
@@ -85,50 +87,73 @@ How can you launch many jobs at once? (Doodad :D)
 
 Doodad is a python package that allows you to quickly launch requests for spot instances with a specified price which is often much cheaper than on demand instances created through the console. With doodad, you can spawn many seeds of a given experiment and log results to reliable AWS storage or an EC2 experiment server.
 
+## Install AWS command line interface
+```
+sudo apt-get update
+sudo apt-get install awscli
+```
+
+Once installed configure:
+```
+aws configure
+```
+
+Set your access key and secret access key to match those found on your amazon account. Set the default region to "us-west-1"
 
 ## Install doodad
 
 ```bash
-git pull https://github.com/justinjfu/doodad.git
+git clone https://github.com/justinjfu/doodad.git
 cd doodad/
-pip install -e .
+git checkout v0.2 # This is the version that supports AWS
+```
+Now we need to add doodad to our $PYTHONPATH environment variable so python can find the library
+
+```bash
+export PYTHONPATH="$PYTHONPATH:/path/to/doodad/"
 ```
 
 Once installed run the EC2 setup script in `scripts/`
 
 ```bash
-python scripts/ec2_setup.py 
+python scripts/setup_ec2.py 
 ```
 
 ## Launching a script
-Lets say we have an example script `doodad_test.py` which takes a single argument and prints it to the command line:
+Lets say we have an example script `doodad_test.py` which takes a single argument `input` and prints it to the command line:
+
 ``` python
-import argparse
-parser = argparse.ArgumentParser()
-parser.add_argument('--input', type=str)
-args = parser.parse_args()
-print('Hello, my input argument is {}'.format(args.input))
+import doodad as dd
+args = dd.get_args()
+print('Hello, my input argument is {}'.format(args['input']))
 ```
 
 To run this script with doodad, make sure you have created a bucket on s3 (through the EC2 console) and run the following code:
 
 ``` python
 import doodad as dd
-mode = dd.mode.EC2AutoConfig(
-			s3_bucket=S3_BUCKET_NAME,
-			s3_log_prefix='storage',
-			s3_log_path='',
-			ami_image=AMI_NAME,
-			aws_key_name=KEY_NAME,
-			instance_type="t2.nano",
-			region='us-central1-a',
-			terminate_on_end=True,
-			spot_price=PRICE_PER_HOUR # Check this on the ec2 spot request calculator (set slightly above min price)
+from doodad.utils import EXAMPLES_DIR, REPO_DIR
+​
+mode = dd.mode.EC2AutoconfigDocker(
+			s3_bucket="BUCKET_NAME",
+			s3_log_prefix='YOUR_EXPERIMENT_DIR_NAME', # Directory where you want to save logs and result files
+			s3_log_name='EXPERIMENT_NAME', # Subdirectory of log prefix to store this specific run
+			image_id="YOUR AMI ID HERE", # i.e ami-042a54dfae89d0418, get this from the details on your snapshot
+			aws_key_name='KEY_NAME', # what you named your key pair when you created your instance.
+			instance_type="INSTANCE_TYPE", # i.e t2.micro
+			region='REGION', # i.e us-west-1
+			terminate=True, # This specifies whether instance should terminate after completing your script.
+			spot_price=.33,  # Check this on the ec2 spot request calculator (set slightly above min price)
+			image='python:3.6.10-buster', # Docker image to use from either dockerhub or already on the instance.
 )
-arg_string '--input doodad'
-run_python('doodad_test.py', cli_args=arg_string, mode=mode_obj, docker_image=DOCKER_IMAGE)
+​
+mounts = [
+    dd.mount.MountLocal(local_dir=REPO_DIR, pythonpath=True) 
+]
+​
+args = {'input': 'MIT!'}
+dd.launch_tools.launch_python('doodad_test.py', args=args, mode=mode, mount_points=mounts)
 ```
-Where `PROJECT_NAME`, `S3_BUCKET_NAME`, `AMI_NAME`, and `DOCKER_IMAGE` are specific to the user.
 
 This code does a few important things:
 
@@ -136,9 +161,9 @@ This code does a few important things:
 
 2) Specifies that the instance should terminate when the target script is done executing.
 
-3) Designates that all log files saved by doodad should be saved to s3 storage, located at path `s3://BUCKET_NAME/storage/doodad_test`
+3) Designates that all log files saved by doodad should be saved to s3 storage, located at path `s3://BUCKET_NAME/YOUR_EXPERIMENT_DIR_NAME/EXPERIMENT_NAME`
 
-5) Constructs input argument string to take `doodad` as input.
+5) Constructs argument dictionary to pass to our script. It has a single argument `input` with value `"MIT!"`
 
 6) Launches `doodad_test.py` to run on the described instance, using docker image `DOCKER_IMAGE`
 	
@@ -155,23 +180,27 @@ import numpy as np
 
 x = np.load('data/example_dat.npy')
 mean, sd = get_metrics(x)
-print("My mean is {} and my sd is {}!".format(mean, sd)
+
+with open('/outputs/results.txt', 'w+') as f:
+	f.write("My mean is {} and my sd is {}!".format(mean, sd))
+
 ``` 
 
-In order for this code to run correctly, we need to *mount* our code from doodad when launching our instances. To do this we modify the original code block:
+In order for this code to run correctly, we need to **mount** our code from doodad when launching our instances. To do this we modify the original code block:
 
 ``` python
 import doodad as dd
 OUTPUT_DIR = '/outputs'
 PROJECT_ROOT = 'path/to/your/project/'
-code_mount = mount.MountLocal(mount_point='utils', local_dir=PROJECT_ROOT+'utils/', pythonpath=True)
+code_mount = mount.MountLocal(mount_point='utils/', local_dir=PROJECT_ROOT+'utils/', pythonpath=True)
 output_mount = mount.MountS3(s3_path='results/', mount_point=OUTPUT_DIR+'results/' , output=True)
 mounts = [code_mount, output_mount]
 ```
 
 Then when we run our code as before, we pass the mounts list to 
+
 ```python
-run_python('doodad_test.py', cli_args=arg_string, mode=mode_obj, mounts=mounts docker_image=DOCKER_IMAGE)
+run_python('doodad_test.py', mode=mode_obj, mount_points=mounts)
 ```
 This code is very similar to before but has two mounts with important arguments.
 1) The code mount specifies `pythonpath=True`, which will automatically append the location of the mounted directory to your python path on your spawned instances.
