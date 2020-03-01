@@ -173,6 +173,15 @@ For a comprehensive list of instance types and their current spot pricing see [h
 ## Mounting Files (AWS)
 For the above example, our script was simple and didn't require any additional code or data to run. Now lets say we have two directories, `utils/` and `data/`
 
+In `utils/` we have a script `metrics.py`:
+
+``` python
+import numpy as np
+
+def get_metrics(x):
+	return np.mean(x), np.std(x)
+``` 
+
 Our script `compute_metrics.py` computes the mean and standard deviation of the data:
 ``` python
 from utils import get_metrics
